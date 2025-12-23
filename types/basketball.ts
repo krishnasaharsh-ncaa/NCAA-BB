@@ -40,6 +40,13 @@ export interface LeagueDailyAggregate {
   value: number;
 }
 
+export interface BoxScore {
+  h1: number;
+  h2: number;
+  ot?: number;
+  total: number;
+}
+
 export interface GameRow {
   id: string;                 // primary key or game_id
   team_id: string;            // the selected team
@@ -48,8 +55,11 @@ export interface GameRow {
   actual_score: string;
   game_date: string;
   home_away: 'Home' | 'Away' | 'Neutral';  // computed based on home_team_id + neutral flag
-  team_score: number;         // computed from winner/loser + team identity
-  opponent_score: number;     
+  team_score: number;         // final score for selected team
+  opponent_score: number;     // final score for opponent
+  team_box: BoxScore;         // H1, H2, OT, Total for selected team
+  opp_box: BoxScore;          // H1, H2, OT, Total for opponent
+  has_ot: boolean;            // whether game went to OT
   open_total?: number;
   close_total?: number;
   game_total?: number;
