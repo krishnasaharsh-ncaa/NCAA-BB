@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { StatToggle } from './StatToggle';
 import type { DailyStatKey, LeagueDailyAggregate } from '@/types/basketball';
+import { RefreshCw, Calculator, Hash, Clock, Calendar, MapPin } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
@@ -28,6 +29,7 @@ const ChevronDownIcon = () => (
 );
 
 export const LeagueOverview: React.FC = () => {
+  // --- States ---
   const [selectedStat, setSelectedStat] = useState<DailyStatKey>('three_p_pct');
   const [selectedSeason, setSelectedSeason] = useState<number>(2025);
   const [showSeasonDropdown, setShowSeasonDropdown] = useState(false);
@@ -35,35 +37,39 @@ export const LeagueOverview: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [dbStatName, setDbStatName] = useState<string>('three-point-pct');
+  
+  // Schedule States
+  const [todaysGames, setTodaysGames] = useState<any[]>([]);
+  const [loadingGames, setLoadingGames] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [displayDate, setDisplayDate] = useState<string>('');
 
   const seasonDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
   useEffect(() => {
+    const now = new Date();
+    setDisplayDate(now.toLocaleDateString('en-US', { 
+      weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' 
+    }));
+
     const handleClickOutside = (event: MouseEvent) => {
       if (seasonDropdownRef.current && !seasonDropdownRef.current.contains(event.target as Node)) {
         setShowSeasonDropdown(false);
       }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 1. Resolve DB Stat Name
   useEffect(() => {
     const match = Object.keys(STAT_MAP).find(k => STAT_MAP[k] === selectedStat);
     setDbStatName(match || selectedStat);
   }, [selectedStat]);
 
-  // 2. Fetch Data
   useEffect(() => {
     if (!dbStatName) return;
-
     const fetchLeagueStats = async () => {
       setLoading(true);
-      setErrorMsg(null);
-
       try {
         const { data: raw, error } = await supabase
           .from('league_daily_trends')
@@ -71,38 +77,58 @@ export const LeagueOverview: React.FC = () => {
           .eq('season_year', selectedSeason)
           .eq('stat_name', dbStatName)
           .order('stat_date', { ascending: true });
-
         if (error) throw error;
-
-        if (!raw || raw.length === 0) {
-          setData([]);
-          return;
-        }
-
-        const formatted: LeagueDailyAggregate[] = raw.map(row => ({
-          stat_date: row.stat_date,
-          value: Number(row.avg_value)
-        }));
-
-        setData(formatted);
-
+        setData(raw ? raw.map(row => ({ stat_date: row.stat_date, value: Number(row.avg_value) })) : []);
       } catch (err: any) {
-        console.error("Fetch error:", err);
         setErrorMsg(err.message || "Unknown error");
       } finally {
         setLoading(false);
       }
     };
-
     fetchLeagueStats();
   }, [dbStatName, selectedSeason]);
+
+  // Fetch Schedule including Location, Predicted Score, and Possessions
+  useEffect(() => {
+    const fetchSchedule = async () => {
+      setLoadingGames(true);
+      const today = new Date().toISOString().split('T')[0];
+      const { data, error } = await supabase
+        .from('day_schedule')
+        .select(`
+          *,
+          team1:team1_id (team_name),
+          team2:team2_id (team_name),
+          winner:predicted_winner (team_name),
+          predicted_score,
+          predicted_possessions,
+          location,
+          open_total,
+          close_total,
+          side_open,
+          side_close
+        `)
+        .eq('game_date', today);
+
+      if (!error && data) setTodaysGames(data);
+      setLoadingGames(false);
+    };
+    fetchSchedule();
+  }, []);
+
+  const handleRetrieve = async (type: 'Totals' | 'Spreads') => {
+    setIsUpdating(true);
+    setTimeout(() => setIsUpdating(false), 2000);
+  };
 
   const currentValue = data.length > 0 ? data[data.length - 1].value : undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       
-      {/* CONTROLS ROW */}
+      {/* SECTION 1: TREND ANALYSIS (Same as previous) */}
+      <section className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+        {/* CONTROLS ROW */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
         <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
           
@@ -206,6 +232,139 @@ export const LeagueOverview: React.FC = () => {
           </div>
         </div>
       </div>
+      </section>
+
+      {/* SECTION 2: TODAY'S SCHEDULE - UPDATED COLUMNS */}
+      <section className="space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 px-2">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <Calendar size={20} className="text-blue-600" />
+              <h3 className="text-lg font-bold text-slate-900">Today's Matchups</h3>
+              <span className="hidden md:inline ml-2 text-sm font-semibold text-slate-400">— {displayDate}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={() => handleRetrieve('Totals')} disabled={isUpdating} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50">
+              <Hash size={14} className="text-emerald-600" />
+              {isUpdating ? 'Updating...' : 'Retrieve Totals'}
+            </button>
+            <button onClick={() => handleRetrieve('Spreads')} disabled={isUpdating} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50">
+              <Calculator size={14} className="text-blue-600" />
+              {isUpdating ? 'Updating...' : 'Retrieve Spreads'}
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-50/50 border-b border-slate-100">
+                  <th className="w-1 px-4 py-4 text-left text-xs font-bold text-slate-500 uppercase">Teams</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Location</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Proj. Score</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Proj. Poss.</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Proj. Winner</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Totals (O/C)</th>
+                  <th className="px-4 py-4 text-right text-xs font-bold text-slate-500 uppercase">Side (O/C)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loadingGames ? (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400 font-medium">
+                    <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 opacity-20" /> Loading...
+                  </td></tr>
+                ) : todaysGames.length > 0 ? (
+                  todaysGames.map((game, idx) => (
+                    <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
+                      {/* Teams Column */}
+                      <td className="w-1 px-4 py-4 whitespace-nowrap">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-bold text-slate-900">{game.team1?.team_name}</span>
+                          <span className="font-bold text-slate-900">{game.team2?.team_name}</span>
+                        </div>
+                      </td>
+
+                      {/* Location Column */}
+                      <td className="px-4 py-4 text-center">
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        {/* Primary Location Badge */}
+                        <div className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+                          <MapPin size={12} className="text-slate-400" />
+                          {game.location || 'Neutral'}
+                        </div>
+                        
+                        {/* Conditional Home Team Label */}
+                        {game.home_team_id ? (
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-tight">
+                            Home: {game.home_team_id === game.team1_id ? game.team1?.team_name : game.team2?.team_name}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight italic">
+                            Neutral Site
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                   
+
+                      {/* Predicted Score Column */}
+                      <td className="px-4 py-4 text-center font-mono font-bold text-slate-900 text-base">
+                        {game.predicted_score || '--'}
+                      </td>
+
+                      {/* Possessions Column */}
+                      <td className="px-4 py-4 text-center">
+                        <span className="text-xs font-bold text-slate-600">{game.predicted_possessions || '--'}</span>
+                      </td>
+
+                      {/* Projected Winner Column */}
+                      <td className="px-4 py-4 text-center">
+                        <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-black bg-green-100 text-green-700 uppercase border border-green-200">
+                          {game.winner?.team_name || 'TBD'}
+                        </span>
+                      </td>
+
+                      {/* Totals Column */}
+                      <td className="px-4 py-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="flex flex-col items-center min-w-[30px]">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                            <span className="font-bold text-slate-700">{game.open_total || '—'}</span>
+                          </div>
+                          <div className="h-6 w-[1px] bg-slate-200" />
+                          <div className="flex flex-col items-center min-w-[30px]">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">C</span>
+                            <span className="font-bold text-blue-600">{game.close_total || '—'}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Sides Column */}
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                            <span className="font-mono font-bold text-slate-700 w-10 text-right">{game.side_open > 0 ? `+${game.side_open}` : game.side_open || '—'}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">C</span>
+                            <span className="font-mono font-bold text-blue-600 w-10 text-right">{game.side_close > 0 ? `+${game.side_close}` : game.side_close || '—'}</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400">No games found in day_schedule.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };
