@@ -28,6 +28,18 @@ const ChevronDownIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
 );
 
+const SPORTSBOOKS = [
+  'draftkings',
+  'fanduel',
+  'pinnacle',
+  'betmgm',
+  'bovada',
+  'betonline',
+  'bookmaker',
+] as const;
+
+const DEFAULT_SPORTSBOOK = 'betmgm';
+
 export const LeagueOverview: React.FC = () => {
   // --- States ---
   const [selectedStat, setSelectedStat] = useState<DailyStatKey>('three_p_pct');
@@ -43,6 +55,7 @@ export const LeagueOverview: React.FC = () => {
   const [loadingGames, setLoadingGames] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [displayDate, setDisplayDate] = useState<string>('');
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
   const seasonDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -122,6 +135,48 @@ export const LeagueOverview: React.FC = () => {
   };
 
   const currentValue = data.length > 0 ? data[data.length - 1].value : undefined;
+
+  const getRowKey = (game: any, idx: number) => (
+    game?.id ? String(game.id) : `${game?.team1_id || 't1'}-${game?.team2_id || 't2'}-${idx}`
+  );
+
+  const getTotalsForBook = (game: any, sportsbook: string) => {
+    if (sportsbook === DEFAULT_SPORTSBOOK) {
+      return { open: game?.open_total, close: game?.close_total };
+    }
+
+    // TODO: Replace placeholder access with real per-book totals once DB columns are known.
+    const placeholderTotals = {
+      draftkings: { open: undefined, close: undefined },
+      fanduel: { open: undefined, close: undefined },
+      pinnacle: { open: undefined, close: undefined },
+      betmgm: { open: undefined, close: undefined },
+      bovada: { open: undefined, close: undefined },
+      betonline: { open: undefined, close: undefined },
+      bookmaker: { open: undefined, close: undefined },
+    };
+
+    return placeholderTotals[sportsbook as keyof typeof placeholderTotals] || { open: undefined, close: undefined };
+  };
+
+  const getSidesForBook = (game: any, sportsbook: string) => {
+    if (sportsbook === DEFAULT_SPORTSBOOK) {
+      return { open: game?.side_open, close: game?.side_close };
+    }
+
+    // TODO: Replace placeholder access with real per-book sides once DB columns are known.
+    const placeholderSides = {
+      draftkings: { open: undefined, close: undefined },
+      fanduel: { open: undefined, close: undefined },
+      pinnacle: { open: undefined, close: undefined },
+      betmgm: { open: undefined, close: undefined },
+      bovada: { open: undefined, close: undefined },
+      betonline: { open: undefined, close: undefined },
+      bookmaker: { open: undefined, close: undefined },
+    };
+
+    return placeholderSides[sportsbook as keyof typeof placeholderSides] || { open: undefined, close: undefined };
+  };
 
   return (
     <div className="space-y-8">
@@ -277,8 +332,18 @@ export const LeagueOverview: React.FC = () => {
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 opacity-20" /> Loading...
                   </td></tr>
                 ) : todaysGames.length > 0 ? (
-                  todaysGames.map((game, idx) => (
-                    <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
+                  todaysGames.map((game, idx) => {
+                    const rowKey = getRowKey(game, idx);
+                    const isExpanded = expandedRowId === rowKey;
+                    const totals = getTotalsForBook(game, DEFAULT_SPORTSBOOK);
+                    const sides = getSidesForBook(game, DEFAULT_SPORTSBOOK);
+
+                    return (
+                    <React.Fragment key={rowKey}>
+                    <tr
+                      className="hover:bg-blue-50/30 transition-colors cursor-pointer"
+                      onClick={() => setExpandedRowId(isExpanded ? null : rowKey)}
+                    >
                       {/* Teams Column */}
                       <td className="w-1 px-4 py-4 whitespace-nowrap">
                         <div className="flex flex-col gap-0.5">
@@ -332,12 +397,12 @@ export const LeagueOverview: React.FC = () => {
                         <div className="flex items-center justify-center gap-2">
                           <div className="flex flex-col items-center min-w-[30px]">
                             <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
-                            <span className="font-bold text-slate-700">{game.open_total || '—'}</span>
+                            <span className="font-bold text-slate-700">{totals.open || '—'}</span>
                           </div>
                           <div className="h-6 w-[1px] bg-slate-200" />
                           <div className="flex flex-col items-center min-w-[30px]">
                             <span className="text-[9px] text-slate-400 font-bold uppercase">C</span>
-                            <span className="font-bold text-blue-600">{game.close_total || '—'}</span>
+                            <span className="font-bold text-blue-600">{totals.close || '—'}</span>
                           </div>
                         </div>
                       </td>
@@ -347,16 +412,77 @@ export const LeagueOverview: React.FC = () => {
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-2">
                             <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
-                            <span className="font-mono font-bold text-slate-700 w-10 text-right">{game.side_open > 0 ? `+${game.side_open}` : game.side_open || '—'}</span>
+                            <span className="font-mono font-bold text-slate-700 w-10 text-right">{sides.open > 0 ? `+${sides.open}` : sides.open || '—'}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">C</span>
-                            <span className="font-mono font-bold text-blue-600 w-10 text-right">{game.side_close > 0 ? `+${game.side_close}` : game.side_close || '—'}</span>
+                            <span className="font-mono font-bold text-blue-600 w-10 text-right">{sides.close > 0 ? `+${sides.close}` : sides.close || '—'}</span>
                           </div>
                         </div>
                       </td>
                     </tr>
-                  ))
+                    {isExpanded && (
+                      <tr className="bg-blue-50/30 border-b border-slate-100">
+                        <td colSpan={7} className="px-6 py-4">
+                          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-slate-50 border-b border-slate-200">
+                                  <th className="px-4 py-3 text-left font-bold text-slate-900">Sportsbook</th>
+                                  <th className="px-4 py-3 text-center font-bold text-slate-700">Totals (O/C)</th>
+                                  <th className="px-4 py-3 text-right font-bold text-slate-700">Side (O/C)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {SPORTSBOOKS.map((book) => {
+                                  const bookTotals = getTotalsForBook(game, book);
+                                  const bookSides = getSidesForBook(game, book);
+
+                                  return (
+                                    <tr key={book} className="border-b border-slate-100 last:border-b-0">
+                                      <td className="px-4 py-3 text-left font-semibold text-slate-900 uppercase text-xs tracking-wide">
+                                        {book}
+                                      </td>
+                                      <td className="px-4 py-3 text-center">
+                                        <div className="flex items-center justify-center gap-2">
+                                          <div className="flex flex-col items-center min-w-[30px]">
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                                            <span className="font-bold text-slate-700">{bookTotals.open || '—'}</span>
+                                          </div>
+                                          <div className="h-6 w-[1px] bg-slate-200" />
+                                          <div className="flex flex-col items-center min-w-[30px]">
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">C</span>
+                                            <span className="font-bold text-blue-600">{bookTotals.close || '—'}</span>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <div className="flex flex-col items-end gap-1">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                                            <span className="font-mono font-bold text-slate-700 w-10 text-right">
+                                              {bookSides.open > 0 ? `+${bookSides.open}` : bookSides.open || '—'}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">C</span>
+                                            <span className="font-mono font-bold text-blue-600 w-10 text-right">
+                                              {bookSides.close > 0 ? `+${bookSides.close}` : bookSides.close || '—'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
+                  )})
                 ) : (
                   <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400">No games found in day_schedule.</td></tr>
                 )}

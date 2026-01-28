@@ -359,42 +359,40 @@ export const TeamDashboard: React.FC = () => {
             </div>
           </div>
 
-          {/* Season Selector with Dropdown */}
-          {!opponentId && (
-            <div className="space-y-2" ref={seasonDropdownRef}>
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-                Season
-              </label>
-              <div className="relative">
-                <button
-                  onClick={() => setShowSeasonDropdown(!showSeasonDropdown)}
-                  className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-lg text-slate-900 font-medium transition-all text-left flex items-center justify-between hover:bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
-                >
-                  <span>{selectedSeason}</span>
-                  <ChevronDownIcon />
-                </button>
-                
-                {showSeasonDropdown && (
-                  <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
-                    {AVAILABLE_SEASONS.map((year) => (
-                      <button
-                        key={year}
-                        onClick={() => {
-                          setSelectedSeason(year);
-                          setShowSeasonDropdown(false);
-                        }}
-                        className={`w-full px-4 py-3 text-left text-sm transition-colors border-b border-slate-50 hover:bg-blue-50 ${
-                          selectedSeason === year ? 'bg-blue-100 text-blue-700 font-semibold' : 'text-slate-900'
-                        }`}
-                      >
-                        {year}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+          {/* Season Selector - Always Show */}
+          <div className="space-y-2" ref={seasonDropdownRef}>
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
+              {opponentId ? "Filter by Season" : "Season"}
+            </label>
+            <div className="relative">
+              <button
+                onClick={() => setShowSeasonDropdown(!showSeasonDropdown)}
+                className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-lg text-slate-900 font-medium transition-all text-left flex items-center justify-between hover:bg-slate-50 focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"
+              >
+                <span>{selectedSeason}</span>
+                <ChevronDownIcon />
+              </button>
+              
+              {showSeasonDropdown && (
+                <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-lg shadow-lg z-50">
+                  {AVAILABLE_SEASONS.map((year) => (
+                    <button
+                      key={year}
+                      onClick={() => {
+                        setSelectedSeason(year);
+                        setShowSeasonDropdown(false);
+                      }}
+                      className={`w-full px-4 py-3 text-left text-sm transition-colors border-b border-slate-50 hover:bg-blue-50 ${
+                        selectedSeason === year ? 'bg-blue-100 text-blue-700 font-semibold' : 'text-slate-900'
+                      }`}
+                    >
+                      {year}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
 

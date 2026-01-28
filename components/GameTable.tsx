@@ -53,9 +53,12 @@ export const GameTable: React.FC<GameTableProps> = ({ games }) => {
               return (
                 <React.Fragment key={g.id}>
                   {/* Main Row */}
-                  <tr className={`border-b border-slate-100 transition-colors ${
-                    isWin ? 'bg-green-50/30 hover:bg-green-50/50' : 'bg-red-50/30 hover:bg-red-50/50'
-                  }`}>
+                  <tr
+                    className={`border-b border-slate-100 transition-colors cursor-pointer ${
+                      isWin ? 'bg-green-50/30 hover:bg-green-50/50' : 'bg-red-50/30 hover:bg-red-50/50'
+                    }`}
+                    onClick={() => setExpandedRowId(isExpanded ? null : g.id)}
+                  >
                     
                     {/* Date */}
                     <td className="px-4 py-4 font-semibold text-slate-900">
@@ -136,19 +139,16 @@ export const GameTable: React.FC<GameTableProps> = ({ games }) => {
 
                     {/* Expand */}
                     <td className="px-4 py-4 text-center">
-                      <button
-                        onClick={() => setExpandedRowId(isExpanded ? null : g.id)}
-                        className={`p-1.5 rounded-lg transition-all ${
-                          isExpanded
-                            ? 'bg-blue-100 text-blue-600'
-                            : 'hover:bg-slate-100 text-slate-400'
-                        }`}
-                      >
+                      <div className={`inline-flex p-1.5 rounded-lg transition-all ${
+                        isExpanded
+                          ? 'bg-blue-100 text-blue-600'
+                          : 'text-slate-400'
+                      }`}>
                         <ChevronDown
                           size={16}
                           className={`transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                         />
-                      </button>
+                      </div>
                     </td>
                   </tr>
 
