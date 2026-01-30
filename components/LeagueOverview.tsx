@@ -28,17 +28,15 @@ const ChevronDownIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" /></svg>
 );
 
-const SPORTSBOOKS = [
-  'draftkings',
-  'fanduel',
-  'pinnacle',
-  'betmgm',
-  'bovada',
-  'betonline',
-  'bookmaker',
-] as const;
+const FALLBACK_SPORTSBOOKS = [
+  { sportsbook: 'draftkings', display_name: 'DRAFTKINGS', sort_order: 1 },
+  { sportsbook: 'fanduel', display_name: 'FANDUEL', sort_order: 2 },
+  { sportsbook: 'pinnacle', display_name: 'PINNACLE', sort_order: 3 },
+  { sportsbook: 'betmgm', display_name: 'BETMGM', sort_order: 4 },
+  { sportsbook: 'betonline', display_name: 'BETONLINE', sort_order: 5 },
+];
 
-const DEFAULT_SPORTSBOOK = 'betmgm';
+const DEFAULT_SPORTSBOOK = 'draftkings';
 
 export const LeagueOverview: React.FC = () => {
   // --- States ---
@@ -55,16 +53,18 @@ export const LeagueOverview: React.FC = () => {
   const [loadingGames, setLoadingGames] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [displayDate, setDisplayDate] = useState<string>('');
+  const [displayDayLabel, setDisplayDayLabel] = useState<string>('');
+  const [scheduleDayOffset, setScheduleDayOffset] = useState(0);
+  const [sportsbooks, setSportsbooks] = useState<Array<{ sportsbook: string; display_name: string; sort_order: number }>>([]);
+  const [linesByGame, setLinesByGame] = useState<Record<string, Record<string, {
+    totals: { over?: { line?: number | null; odds?: number | null }, under?: { line?: number | null; odds?: number | null } },
+    spreads: { home?: { line?: number | null; odds?: number | null }, away?: { line?: number | null; odds?: number | null } }
+  }>>>({});
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
   const seasonDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const now = new Date();
-    setDisplayDate(now.toLocaleDateString('en-US', { 
-      weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' 
-    }));
-
     const handleClickOutside = (event: MouseEvent) => {
       if (seasonDropdownRef.current && !seasonDropdownRef.current.contains(event.target as Node)) {
         setShowSeasonDropdown(false);
@@ -73,6 +73,38 @@ export const LeagueOverview: React.FC = () => {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const getLocalDateString = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getScheduleDate = (offsetDays: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offsetDays);
+    return date;
+  };
+
+  const getOrdinalSuffix = (day: number) => {
+    if (day % 100 >= 11 && day % 100 <= 13) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
+
+  useEffect(() => {
+    const date = getScheduleDate(scheduleDayOffset);
+    const month = date.toLocaleDateString('en-US', { month: 'short' });
+    const dayNum = date.getDate();
+    const dayLabel = date.toLocaleDateString('en-US', { weekday: 'long' });
+    setDisplayDate(`${month}, ${dayNum}${getOrdinalSuffix(dayNum)}`);
+    setDisplayDayLabel(dayLabel);
+  }, [scheduleDayOffset]);
 
   useEffect(() => {
     const match = Object.keys(STAT_MAP).find(k => STAT_MAP[k] === selectedStat);
@@ -105,7 +137,9 @@ export const LeagueOverview: React.FC = () => {
   useEffect(() => {
     const fetchSchedule = async () => {
       setLoadingGames(true);
-      const today = new Date().toISOString().split('T')[0];
+      const date = getScheduleDate(scheduleDayOffset);
+      const localDate = getLocalDateString(date);
+      //console.log('[LeagueOverview] day_schedule query date', localDate);
       const { data, error } = await supabase
         .from('day_schedule')
         .select(`
@@ -115,19 +149,105 @@ export const LeagueOverview: React.FC = () => {
           winner:predicted_winner (team_name),
           predicted_score,
           predicted_possessions,
-          location,
-          open_total,
-          close_total,
-          side_open,
-          side_close
+          location
         `)
-        .eq('game_date', today);
+        .eq('game_date', localDate);
 
+      if (error) {
+        console.error('[LeagueOverview] day_schedule error', error);
+      }
       if (!error && data) setTodaysGames(data);
       setLoadingGames(false);
     };
     fetchSchedule();
+  }, [scheduleDayOffset]);
+
+  useEffect(() => {
+    const fetchSportsbooks = async () => {
+      const { data, error } = await supabase
+        .from('sportsbooks')
+        .select('sportsbook, display_name, sort_order')
+        .order('sort_order', { ascending: true });
+
+      if (error) {
+        console.error('[LeagueOverview] sportsbooks error', error);
+        return;
+      }
+      if (data) setSportsbooks(data);
+    };
+    fetchSportsbooks();
   }, []);
+
+  useEffect(() => {
+    if (!todaysGames.length) {
+      setLinesByGame({});
+      return;
+    }
+
+    const fetchLinesForGame = async (game: any) => {
+      console.log('[LeagueOverview] game_market_lines query', {
+        game_date: game.game_date,
+        team1_id: game.team1_id,
+        team2_id: game.team2_id,
+      });
+      const { data, error } = await supabase
+        .from('game_market_lines')
+        .select('sportsbook, market, side_type, line, odds, line_state')
+        .eq('game_date', game.game_date)
+        .eq('team1_id', game.team1_id)
+        .eq('team2_id', game.team2_id)
+        .eq('line_state', 'current');
+
+      if (error) {
+        console.error('[LeagueOverview] game_market_lines error', error, game);
+        return null;
+      }
+      console.log('[LeagueOverview] game_market_lines rows', data?.length || 0, data);
+
+      const bookMap: Record<string, {
+        totals: { over?: { line?: number | null; odds?: number | null }, under?: { line?: number | null; odds?: number | null } },
+        spreads: { home?: { line?: number | null; odds?: number | null }, away?: { line?: number | null; odds?: number | null } }
+      }> = {};
+
+      for (const row of data || []) {
+        if (!bookMap[row.sportsbook]) {
+          bookMap[row.sportsbook] = { totals: {}, spreads: {} };
+        }
+        if (row.market === 'total') {
+          if (row.side_type === 'over') {
+            bookMap[row.sportsbook].totals.over = { line: row.line, odds: row.odds };
+          } else if (row.side_type === 'under') {
+            bookMap[row.sportsbook].totals.under = { line: row.line, odds: row.odds };
+          }
+        } else if (row.market === 'spread') {
+          if (row.side_type === 'team_1') {
+            bookMap[row.sportsbook].spreads.home = { line: row.line, odds: row.odds };
+          } else if (row.side_type === 'team_2') {
+            bookMap[row.sportsbook].spreads.away = { line: row.line, odds: row.odds };
+          }
+        }
+      }
+
+      return bookMap;
+    };
+
+    const loadAll = async () => {
+      const updates: Record<string, Record<string, {
+        totals: { over?: { line?: number | null; odds?: number | null }, under?: { line?: number | null; odds?: number | null } },
+        spreads: { home?: { line?: number | null; odds?: number | null }, away?: { line?: number | null; odds?: number | null } }
+      }>> = {};
+
+      await Promise.all(todaysGames.map(async (game, idx) => {
+        const key = getRowKey(game, idx);
+        const bookMap = await fetchLinesForGame(game);
+        if (bookMap) updates[key] = bookMap;
+      }));
+
+      setLinesByGame(updates);
+    };
+
+    loadAll();
+  }, [todaysGames]);
 
   const handleRetrieve = async (type: 'Totals' | 'Spreads') => {
     setIsUpdating(true);
@@ -137,45 +257,62 @@ export const LeagueOverview: React.FC = () => {
   const currentValue = data.length > 0 ? data[data.length - 1].value : undefined;
 
   const getRowKey = (game: any, idx: number) => (
-    game?.id ? String(game.id) : `${game?.team1_id || 't1'}-${game?.team2_id || 't2'}-${idx}`
+    `${game?.game_date || 'date'}-${game?.team1_id || 't1'}-${game?.team2_id || 't2'}-${idx}`
   );
 
-  const getTotalsForBook = (game: any, sportsbook: string) => {
-    if (sportsbook === DEFAULT_SPORTSBOOK) {
-      return { open: game?.open_total, close: game?.close_total };
-    }
-
-    // TODO: Replace placeholder access with real per-book totals once DB columns are known.
-    const placeholderTotals = {
-      draftkings: { open: undefined, close: undefined },
-      fanduel: { open: undefined, close: undefined },
-      pinnacle: { open: undefined, close: undefined },
-      betmgm: { open: undefined, close: undefined },
-      bovada: { open: undefined, close: undefined },
-      betonline: { open: undefined, close: undefined },
-      bookmaker: { open: undefined, close: undefined },
+  const getTotalsForBook = (rowKey: string, sportsbook: string) => {
+    const lines = linesByGame[rowKey]?.[sportsbook];
+    return {
+      over: lines?.totals.over,
+      under: lines?.totals.under,
     };
-
-    return placeholderTotals[sportsbook as keyof typeof placeholderTotals] || { open: undefined, close: undefined };
   };
 
-  const getSidesForBook = (game: any, sportsbook: string) => {
-    if (sportsbook === DEFAULT_SPORTSBOOK) {
-      return { open: game?.side_open, close: game?.side_close };
-    }
-
-    // TODO: Replace placeholder access with real per-book sides once DB columns are known.
-    const placeholderSides = {
-      draftkings: { open: undefined, close: undefined },
-      fanduel: { open: undefined, close: undefined },
-      pinnacle: { open: undefined, close: undefined },
-      betmgm: { open: undefined, close: undefined },
-      bovada: { open: undefined, close: undefined },
-      betonline: { open: undefined, close: undefined },
-      bookmaker: { open: undefined, close: undefined },
+  const getSidesForBook = (rowKey: string, sportsbook: string) => {
+    const lines = linesByGame[rowKey]?.[sportsbook];
+    return {
+      home: lines?.spreads.home,
+      away: lines?.spreads.away,
     };
+  };
 
-    return placeholderSides[sportsbook as keyof typeof placeholderSides] || { open: undefined, close: undefined };
+  const getTeamSidesForBook = (game: any, rowKey: string, sportsbook: string) => {
+    const sides = getSidesForBook(rowKey, sportsbook);
+    const homeIsTeam1 = game?.home_team_id && game?.home_team_id === game?.team1_id;
+    if (homeIsTeam1) {
+      return { t1: sides.home, t2: sides.away };
+    }
+    return { t1: sides.away, t2: sides.home };
+  };
+
+  const getOddsForBook = (rowKey: string, sportsbook: string) => {
+    const totals = getTotalsForBook(rowKey, sportsbook);
+    const spreads = getSidesForBook(rowKey, sportsbook);
+    return {
+      over: totals.over?.odds,
+      under: totals.under?.odds,
+      home: spreads.home?.odds,
+      away: spreads.away?.odds,
+    };
+  };
+
+  const getTeamOddsForBook = (game: any, rowKey: string, sportsbook: string) => {
+    const odds = getOddsForBook(rowKey, sportsbook);
+    const homeIsTeam1 = game?.home_team_id && game?.home_team_id === game?.team1_id;
+    if (homeIsTeam1) {
+      return { t1: odds.home, t2: odds.away, under: odds.under, over: odds.over };
+    }
+    return { t1: odds.away, t2: odds.home, under: odds.under, over: odds.over };
+  };
+
+  const getOpenTotalFromPredictedScore = (predictedScore: string | null | undefined) => {
+    if (!predictedScore) return null;
+    const parts = predictedScore.split(/[^0-9]+/).filter(Boolean);
+    if (parts.length < 2) return null;
+    const a = Number.parseInt(parts[0], 10);
+    const b = Number.parseInt(parts[1], 10);
+    if (Number.isNaN(a) || Number.isNaN(b)) return null;
+    return a + b;
   };
 
   return (
@@ -295,12 +432,28 @@ export const LeagueOverview: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <Calendar size={20} className="text-blue-600" />
-              <h3 className="text-lg font-bold text-slate-900">Today's Matchups</h3>
-              <span className="hidden md:inline ml-2 text-sm font-semibold text-slate-400">— {displayDate}</span>
+              <h3 className="text-lg font-bold text-slate-900">{displayDate} Matchups</h3>
+              <span className="hidden md:inline ml-2 text-sm font-semibold text-slate-400">— {displayDayLabel}</span>
             </div>
           </div>
 
           <div className="flex gap-2">
+            <div className="flex items-center gap-2 mr-2">
+              <button
+                onClick={() => setScheduleDayOffset((prev) => Math.max(0, prev - 1))}
+                disabled={scheduleDayOffset === 0}
+                className="px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50"
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={() => setScheduleDayOffset((prev) => Math.min(2, prev + 1))}
+                disabled={scheduleDayOffset === 2}
+                className="px-3 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50"
+              >
+                Next →
+              </button>
+            </div>
             <button onClick={() => handleRetrieve('Totals')} disabled={isUpdating} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50">
               <Hash size={14} className="text-emerald-600" />
               {isUpdating ? 'Updating...' : 'Retrieve Totals'}
@@ -320,23 +473,27 @@ export const LeagueOverview: React.FC = () => {
                   <th className="w-1 px-4 py-4 text-left text-xs font-bold text-slate-500 uppercase">Teams</th>
                   <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Location</th>
                   <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Proj. Score</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Open Total</th>
                   <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Proj. Poss.</th>
                   <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Proj. Winner</th>
-                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Totals (O/C)</th>
-                  <th className="px-4 py-4 text-right text-xs font-bold text-slate-500 uppercase">Side (O/C)</th>
+                  <th className="px-4 py-4 text-center text-xs font-bold text-slate-500 uppercase">Totals (U/O)</th>
+                  <th className="px-4 py-4 text-right text-xs font-bold text-slate-500 uppercase">Side (T1/T2)</th>
+                  <th className="px-4 py-4 text-right text-xs font-bold text-slate-500 uppercase">Odds</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {loadingGames ? (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400 font-medium">
+                  <tr><td colSpan={9} className="px-6 py-12 text-center text-slate-400 font-medium">
                     <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 opacity-20" /> Loading...
                   </td></tr>
                 ) : todaysGames.length > 0 ? (
                   todaysGames.map((game, idx) => {
                     const rowKey = getRowKey(game, idx);
                     const isExpanded = expandedRowId === rowKey;
-                    const totals = getTotalsForBook(game, DEFAULT_SPORTSBOOK);
-                    const sides = getSidesForBook(game, DEFAULT_SPORTSBOOK);
+                    const totals = getTotalsForBook(rowKey, DEFAULT_SPORTSBOOK);
+                    const sides = getTeamSidesForBook(game, rowKey, DEFAULT_SPORTSBOOK);
+                    const odds = getTeamOddsForBook(game, rowKey, DEFAULT_SPORTSBOOK);
+                    const sportsbookList = sportsbooks.length ? sportsbooks : FALLBACK_SPORTSBOOKS;
 
                     return (
                     <React.Fragment key={rowKey}>
@@ -380,6 +537,13 @@ export const LeagueOverview: React.FC = () => {
                         {game.predicted_score || '--'}
                       </td>
 
+                      {/* Open Total Column */}
+                      <td className="px-4 py-4 text-center">
+                        <span className="text-xs font-bold text-slate-700">
+                          {getOpenTotalFromPredictedScore(game.predicted_score) ?? '—'}
+                        </span>
+                      </td>
+
                       {/* Possessions Column */}
                       <td className="px-4 py-4 text-center">
                         <span className="text-xs font-bold text-slate-600">{game.predicted_possessions || '--'}</span>
@@ -396,13 +560,13 @@ export const LeagueOverview: React.FC = () => {
                       <td className="px-4 py-4 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <div className="flex flex-col items-center min-w-[30px]">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
-                            <span className="font-bold text-slate-700">{totals.open || '—'}</span>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">U</span>
+                            <span className="font-bold text-slate-700">{totals.under?.line ?? '—'}</span>
                           </div>
                           <div className="h-6 w-[1px] bg-slate-200" />
                           <div className="flex flex-col items-center min-w-[30px]">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase">C</span>
-                            <span className="font-bold text-blue-600">{totals.close || '—'}</span>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                            <span className="font-bold text-blue-600">{totals.over?.line ?? '—'}</span>
                           </div>
                         </div>
                       </td>
@@ -411,63 +575,111 @@ export const LeagueOverview: React.FC = () => {
                       <td className="px-4 py-4 text-right">
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
-                            <span className="font-mono font-bold text-slate-700 w-10 text-right">{sides.open > 0 ? `+${sides.open}` : sides.open || '—'}</span>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">T1</span>
+                            <span className="font-mono font-bold text-slate-700 w-10 text-right">
+                              {sides.t1?.line !== undefined && sides.t1?.line !== null
+                                ? (Number(sides.t1.line) > 0 ? `+${sides.t1.line}` : sides.t1.line)
+                                : '—'}
+                            </span>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">C</span>
-                            <span className="font-mono font-bold text-blue-600 w-10 text-right">{sides.close > 0 ? `+${sides.close}` : sides.close || '—'}</span>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">T2</span>
+                            <span className="font-mono font-bold text-blue-600 w-10 text-right">
+                              {sides.t2?.line !== undefined && sides.t2?.line !== null
+                                ? (Number(sides.t2.line) > 0 ? `+${sides.t2.line}` : sides.t2.line)
+                                : '—'}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Odds Column */}
+                      <td className="px-4 py-4 text-right">
+                        <div className="flex flex-col items-end gap-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase">U/O</span>
+                            <span className="font-mono font-bold text-slate-700 w-16 text-right">
+                              {odds.under ?? '—'} / {odds.over ?? '—'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">T1/T2</span>
+                            <span className="font-mono font-bold text-blue-600 w-16 text-right">
+                              {odds.t1 ?? '—'} / {odds.t2 ?? '—'}
+                            </span>
                           </div>
                         </div>
                       </td>
                     </tr>
                     {isExpanded && (
                       <tr className="bg-blue-50/30 border-b border-slate-100">
-                        <td colSpan={7} className="px-6 py-4">
+                        <td colSpan={9} className="px-6 py-4">
                           <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200">
                                   <th className="px-4 py-3 text-left font-bold text-slate-900">Sportsbook</th>
-                                  <th className="px-4 py-3 text-center font-bold text-slate-700">Totals (O/C)</th>
-                                  <th className="px-4 py-3 text-right font-bold text-slate-700">Side (O/C)</th>
+                                  <th className="px-4 py-3 text-center font-bold text-slate-700">Totals (U/O)</th>
+                                  <th className="px-4 py-3 text-right font-bold text-slate-700">Side (T1/T2)</th>
+                                  <th className="px-4 py-3 text-right font-bold text-slate-700">Odds</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {SPORTSBOOKS.map((book) => {
-                                  const bookTotals = getTotalsForBook(game, book);
-                                  const bookSides = getSidesForBook(game, book);
+                                {sportsbookList.map((book) => {
+                                  const bookTotals = getTotalsForBook(rowKey, book.sportsbook);
+                                  const bookSides = getTeamSidesForBook(game, rowKey, book.sportsbook);
+                                  const bookOdds = getTeamOddsForBook(game, rowKey, book.sportsbook);
 
                                   return (
-                                    <tr key={book} className="border-b border-slate-100 last:border-b-0">
+                                    <tr key={book.sportsbook} className="border-b border-slate-100 last:border-b-0">
                                       <td className="px-4 py-3 text-left font-semibold text-slate-900 uppercase text-xs tracking-wide">
-                                        {book}
+                                        {book.display_name}
                                       </td>
                                       <td className="px-4 py-3 text-center">
                                         <div className="flex items-center justify-center gap-2">
                                           <div className="flex flex-col items-center min-w-[30px]">
-                                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
-                                            <span className="font-bold text-slate-700">{bookTotals.open || '—'}</span>
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">U</span>
+                                            <span className="font-bold text-slate-700">{bookTotals.under?.line ?? '—'}</span>
                                           </div>
                                           <div className="h-6 w-[1px] bg-slate-200" />
                                           <div className="flex flex-col items-center min-w-[30px]">
-                                            <span className="text-[9px] text-slate-400 font-bold uppercase">C</span>
-                                            <span className="font-bold text-blue-600">{bookTotals.close || '—'}</span>
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                                            <span className="font-bold text-blue-600">{bookTotals.over?.line ?? '—'}</span>
                                           </div>
                                         </div>
                                       </td>
                                       <td className="px-4 py-3 text-right">
                                         <div className="flex flex-col items-end gap-1">
                                           <div className="flex items-center gap-2">
-                                            <span className="text-[9px] text-slate-400 font-bold uppercase">O</span>
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">T1</span>
                                             <span className="font-mono font-bold text-slate-700 w-10 text-right">
-                                              {bookSides.open > 0 ? `+${bookSides.open}` : bookSides.open || '—'}
+                                              {bookSides.t1?.line !== undefined && bookSides.t1?.line !== null
+                                                ? (Number(bookSides.t1.line) > 0 ? `+${bookSides.t1.line}` : bookSides.t1.line)
+                                                : '—'}
                                             </span>
                                           </div>
                                           <div className="flex items-center gap-2">
-                                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">C</span>
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">T2</span>
                                             <span className="font-mono font-bold text-blue-600 w-10 text-right">
-                                              {bookSides.close > 0 ? `+${bookSides.close}` : bookSides.close || '—'}
+                                              {bookSides.t2?.line !== undefined && bookSides.t2?.line !== null
+                                                ? (Number(bookSides.t2.line) > 0 ? `+${bookSides.t2.line}` : bookSides.t2.line)
+                                                : '—'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-3 text-right">
+                                        <div className="flex flex-col items-end gap-1">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase">U/O</span>
+                                            <span className="font-mono font-bold text-slate-700 w-16 text-right">
+                                              {bookOdds.under ?? '—'} / {bookOdds.over ?? '—'}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[9px] text-slate-400 font-bold uppercase text-blue-600">T1/T2</span>
+                                            <span className="font-mono font-bold text-blue-600 w-16 text-right">
+                                              {bookOdds.t1 ?? '—'} / {bookOdds.t2 ?? '—'}
                                             </span>
                                           </div>
                                         </div>
@@ -484,7 +696,7 @@ export const LeagueOverview: React.FC = () => {
                     </React.Fragment>
                   )})
                 ) : (
-                  <tr><td colSpan={7} className="px-6 py-12 text-center text-slate-400">No games found in day_schedule.</td></tr>
+                  <tr><td colSpan={9} className="px-6 py-12 text-center text-slate-400">No games found in day_schedule.</td></tr>
                 )}
               </tbody>
             </table>
