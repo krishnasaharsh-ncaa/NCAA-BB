@@ -454,14 +454,6 @@ export const LeagueOverview: React.FC = () => {
                 Next →
               </button>
             </div>
-            <button onClick={() => handleRetrieve('Totals')} disabled={isUpdating} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50">
-              <Hash size={14} className="text-emerald-600" />
-              {isUpdating ? 'Updating...' : 'Retrieve Totals'}
-            </button>
-            <button onClick={() => handleRetrieve('Spreads')} disabled={isUpdating} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg font-bold text-xs text-slate-700 hover:bg-slate-50 shadow-sm disabled:opacity-50">
-              <Calculator size={14} className="text-blue-600" />
-              {isUpdating ? 'Updating...' : 'Retrieve Spreads'}
-            </button>
           </div>
         </div>
 
